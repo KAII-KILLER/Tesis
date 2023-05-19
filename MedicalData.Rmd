@@ -1,0 +1,189 @@
+---
+title: "DASHBOARD ANÁLISIS DATA MÉDICA"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard) # creación de dashboards
+library(shiny) # dashboard interactivo
+library(dplyr) # manipulación de datos
+library(plotly) # gráficos
+library(rjson) # lectura de archivos json
+library(highcharter) # gráfico mapas
+library(lubridate) # cálculo de edades
+```
+
+```{r data}
+data <- read.csv("BankChurners.csv")
+Categorical.Variables <- c("Gender", "Education_Level", "Marital_Status", "Card_Category")
+Numeric.Variables <- c("Customer_Age", "Total_Trans_Ct", "Credit_Limit")
+
+data_pacientes <- read.csv("/home/leonardo/Documents/Tesis/pacientes_clean2.csv")
+
+# Crear una nueva columna con los rangos de edad
+data_pacientes <- data_pacientes %>%
+  mutate(RangoEdad = case_when(
+    edad >= 0 & edad <= 2 ~ "1. Lactantes (0-2)",
+    edad >= 3 & edad <= 5 ~ "2. Pre-escolares (3-5)",
+    edad >= 6 & edad <= 11 ~ "3. Escolares (6-11)",
+    edad >= 12 & edad <= 17 ~ "4. Adolescentes (12-17)",
+    TRUE ~ "Otro"
+  ))
+```
+# Sidebar {data-width=200 .sidebar}
+
+```{r}
+selectInput("categorical_variable", label = "Select Categorical Variable:", choices = Categorical.Variables)
+selectInput("numeric_variable", label = "Select Numeric Variable:", choices = Numeric.Variables)
+```
+
+# Morbilidad
+## Columna 1
+### Mapa
+
+```{r}
+ecuador <- fromJSON(file = "https://raw.githubusercontent.com/Rusersgroup/mapa_ecuador/master/ec-all.geo.json")
+
+mapa <- data_pacientes %>%
+  group_by(provincia) %>%
+  summarise(count = n())
+
+mapa <- data.frame(mapa)
+
+highchart() %>%
+  hc_tooltip(followPointer = FALSE) %>%
+  hc_add_series_map(ecuador, mapa,
+    name = "Pacientes",
+    value = "count", joinBy = c("name", "provincia"),
+    dataLabels = list(
+      enabled = TRUE,
+      format = "{point.properties.woe-name}"
+    )
+  )
+```
+## Columna 2
+### Pacientes por provincia
+```{r}
+bar_chart <- data_pacientes %>%
+  group_by(provincia) %>%
+  summarise(count = n()) %>%
+  arrange(desc(count)) %>%
+  mutate(provincia = factor(provincia, levels = unique(provincia)))
+
+plot_ly(data = bar_chart, x = ~count, y = ~provincia, type = "bar", orientation = "h") %>%
+  layout(
+    xaxis = list(title = "Número de Pacientes"),
+    yaxis = list(title = "Provincia")
+  )
+```
+### Diagnósticos
+```{r}
+diag_chart <- data_pacientes %>%
+  mutate(diagnostico = recode(diagnostico,
+    "a" = "Meningitis",
+    "b" = "Parálisis Cerebral",
+    "c" = "Epilepsia",
+    "d" = "Traumatismo Craneoencefálico",
+    "e" = "Tumor Cerebral",
+    "f" = "Dificultades de Aprendizaje",
+    "g" = "TEA",
+    "h" = "TDAH"
+  )) %>%
+  group_by(diagnostico) %>%
+  summarise(count = n()) %>%
+  arrange(desc(count)) %>%
+  mutate(diagnostico = factor(diagnostico, levels = unique(diagnostico)))
+
+plot_ly(data = diag_chart, x = ~count, y = ~diagnostico, type = "bar", orientation = "h") %>%
+  layout(
+    xaxis = list(title = "Número de Pacientes"),
+    yaxis = list(title = "Diagnóstico")
+  )
+```
+
+```{r}
+bar_chart <- data_pacientes %>%
+  group_by(provincia) %>%
+  summarise(count = n()) %>%
+  arrange(desc(count)) %>%
+  mutate(provincia = factor(provincia, levels = unique(provincia)))
+
+plot_ly(data = bar_chart, x = ~count, y = ~provincia, type = "bar", orientation = "h") %>%
+  layout(
+    title = "Pacientes por ubicación",
+    xaxis = list(title = "Número de Pacientes"),
+    yaxis = list(title = "Provincia")
+  )
+```
+
+# Información de pacientes
+## Columna 1
+### Porcentaje de pacientes por sexo
+```{r}
+sexo_counts <- data_pacientes %>%
+  count(genero)
+
+plot_ly(data = sexo_counts, labels = ~genero, values = ~n, type = "pie", hole = 0.5) %>%
+  layout(
+    showlegend = FALSE
+  )
+```
+
+### Pacientes por rango de edad
+```{r}
+# Calcular el conteo de pacientes por cada rango de edad
+datos_edad <- data_pacientes %>%
+  group_by(edad) %>%
+  count()
+
+plot_ly(datos_edad,
+  x = ~edad, y = ~n, type = "bar",
+  hovertemplate = paste("Edad: %{x}", "<br>", "Número de Pacientes: %{y}")
+) %>%
+  layout(
+    xaxis = list(title = "Edad"),
+    yaxis = list(title = "Número de Pacientes")
+  )
+```
+
+## Column 2
+### Pirámide Poblacional
+```{r}
+datos_piramide <- data_pacientes %>%
+  group_by(RangoEdad, genero) %>%
+  summarise(Pacientes = n())
+
+datos_piramide$Cantidad <- ifelse(datos_piramide$genero == "Masculino", datos_piramide$Pacientes, -datos_piramide$Pacientes)
+
+datos_piramide <- datos_piramide %>%
+  arrange(RangoEdad)
+
+# Crear el gráfico de barras doble
+plot_ly(datos_piramide,
+  x = ~Cantidad, y = ~RangoEdad, type = "bar",
+  orientation = "h", color = ~genero, colors = c("#1f77b4", "#ff7f0e"),
+  hovertemplate = paste(
+    "Rango de Edad: %{y}", "<br>",
+    "Cantidad de Pacientes: %{x}"
+  )
+) %>%
+  layout(
+    xaxis = list(title = "Cantidad de Pacientes"),
+    yaxis = list(title = "Rango de Edad"),
+    barmode = "relative",
+    bargap = 0.2
+  )
+```
+
+# Fechas de atenciones
+
+## Columna 1
+
+### Atenciones por año
+
+
+# Tendencias
